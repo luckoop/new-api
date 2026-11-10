@@ -141,6 +141,13 @@ func GetRandomSatisfiedChannel(
 		return nil, nil
 	}
 
+	// Queue-aware routing: trigger on-demand metrics sampling for every
+	// channel serving this model. Must run BEFORE the overload filter below:
+	// queue data is the input to that filter, so filtering first would leave
+	// bypassed channels without fresh samples (they could never recover).
+	TryRefreshInferenceChannels(channels)
+	channels = dropQueueOverloadedChannelIDs(channels)
+
 	if len(channels) == 1 {
 		if channel, ok := channelsIDM[channels[0]]; ok {
 			return channel, nil

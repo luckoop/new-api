@@ -22,6 +22,17 @@ type PolicyDecision struct {
 	Source string `json:"source"`
 }
 
+// QueueSnapshot records the queue state at the moment a channel was chosen.
+// It is distinct from the billing-time channel_queue_load badge: long requests
+// finish when the queue is naturally deep, so that badge cannot be used to
+// reconstruct the decision.
+type QueueSnapshot struct {
+	Waiting    int   `json:"waiting"`
+	Running    int   `json:"running"`
+	Overloaded bool  `json:"overloaded"`
+	AgeMS      int64 `json:"age_ms"`
+}
+
 type PolicyEvent struct {
 	Attempt     int            `json:"attempt"`
 	ChannelID   int            `json:"channel_id,omitempty"`
@@ -33,6 +44,7 @@ type PolicyEvent struct {
 	ElapsedMS   int64          `json:"elapsed_ms"`
 	Decision    PolicyDecision `json:"decision"`
 	Health      string         `json:"health,omitempty"`
+	Queue       *QueueSnapshot `json:"queue,omitempty"`
 }
 
 // RequestPolicyState records how one request was routed so administrators can
@@ -91,7 +103,26 @@ func (s *RequestPolicyState) BeginAttempt(channel *model.Channel, group string) 
 	s.Successful = false
 	s.OutcomeRecorded = false
 	s.SelectedGroup = group
-	s.AddEvent(PolicyEvent{ChannelID: channel.Id, Decision: PolicyDecision{Action: "attempt", Reason: "channel_selected", Source: "routing"}})
+	event := PolicyEvent{ChannelID: channel.Id, Decision: PolicyDecision{Action: "attempt", Reason: "channel_selected", Source: "routing"}}
+	event.Queue = channelQueueSnapshot(channel.Id)
+	s.AddEvent(event)
+}
+
+// channelQueueSnapshot attaches the decision-time queue state to the
+// channel_selected event. Channels with no sample are left untouched so
+// ordinary channel logs keep their existing shape.
+func channelQueueSnapshot(channelID int) *QueueSnapshot {
+	load, ok := model.GetInferenceLoad(channelID)
+	if !ok || !load.OK {
+		return nil
+	}
+	age := time.Since(time.Unix(load.SampledAt, 0)).Milliseconds()
+	return &QueueSnapshot{
+		Waiting:    int(load.Waiting),
+		Running:    int(load.Running),
+		Overloaded: model.IsChannelQueueOverloaded(channelID),
+		AgeMS:      max(0, age),
+	}
 }
 
 // RecordPolicyFailure appends the failed attempt and the retry decision made

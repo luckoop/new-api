@@ -227,6 +227,7 @@ const (
 	advancedCustomEndpointPathDeepSeekToolsSearch    = "/v1/tools/search"
 	advancedCustomEndpointPathDeepSeekToolsFetch     = "/v1/tools/fetch"
 	advancedCustomEndpointPathClaudeMessages         = "/v1/messages"
+	advancedCustomEndpointPathClaudeCountTokens      = "/v1/messages/count_tokens"
 	advancedCustomEndpointPathJinaRerank             = "/v1/rerank"
 	advancedCustomEndpointPathImageGeneration        = "/v1/images/generations"
 	advancedCustomEndpointPathEmbeddings             = "/v1/embeddings"
@@ -355,7 +356,7 @@ func advancedCustomEndpointTypeFromIncomingPath(incomingPath string) (types.Endp
 		return types.EndpointTypeDeepSeekToolsSearch, true
 	case advancedCustomEndpointPathDeepSeekToolsFetch:
 		return types.EndpointTypeDeepSeekToolsFetch, true
-	case advancedCustomEndpointPathClaudeMessages:
+	case advancedCustomEndpointPathClaudeMessages, advancedCustomEndpointPathClaudeCountTokens:
 		return types.EndpointTypeAnthropic, true
 	case advancedCustomEndpointPathJinaRerank:
 		return types.EndpointTypeJinaRerank, true

@@ -132,3 +132,48 @@ func TestSGLangRerankRejectsMalformedResults(t *testing.T) {
 		})
 	}
 }
+
+func TestVLLMRerankPassthrough(t *testing.T) {
+	service.InitHttpClient()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/prefix/v1/rerank", r.URL.Path)
+		// The vLLM preset route omits Auth, so the adaptor must fall back to
+		// the default Authorization: Bearer {api_key} header.
+		assert.Equal(t, "Bearer test-key", r.Header.Get("Authorization"))
+		var request dto.RerankRequest
+		require.NoError(t, common.DecodeJson(r.Body, &request))
+		assert.Equal(t, "served-reranker", request.Model)
+		assert.Equal(t, []any{"first", "second"}, request.Documents)
+		// vLLM's rerank endpoint natively returns the Jina response shape, so
+		// the passthrough needs no converter on either direction.
+		_, _ = io.WriteString(w, `{"results":[{"index":1,"relevance_score":0.9,"document":{"text":"second"}}],"usage":{"total_tokens":7}}`)
+	}))
+	defer upstream.Close()
+	info := &relaycommon.RelayInfo{
+		ChannelMeta:    &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeVLLM, ChannelBaseUrl: upstream.URL + "/prefix", ApiKey: "test-key"},
+		RequestURLPath: "/rerank", RelayMode: relayconstant.RelayModeRerank,
+		RelayFormat:  types.RelayFormatOpenAI,
+		RerankerInfo: &relaycommon.RerankerInfo{Documents: []any{"first", "second"}, ReturnDocuments: true},
+	}
+	info.SetEstimatePromptTokens(12)
+	adaptor := &advancedcustom.Adaptor{}
+	info.ChannelOtherSettings.AdvancedCustom = common.GetAdvancedCustomPreset(constant.ChannelTypeVLLM)
+	adaptor.Init(info)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/rerank", nil).WithContext(context.Background())
+	converted, err := adaptor.ConvertRerankRequest(c, info.RelayMode, dto.RerankRequest{Model: "served-reranker", Query: "query", Documents: info.Documents})
+	require.NoError(t, err)
+	body, err := common.Marshal(converted)
+	require.NoError(t, err)
+	response, err := adaptor.DoRequest(c, info, bytes.NewReader(body))
+	require.NoError(t, err)
+	usage, apiErr := adaptor.DoResponse(c, response.(*http.Response), info)
+	require.Nil(t, apiErr)
+	assert.Equal(t, 7, usage.(*dto.Usage).TotalTokens)
+	var decoded dto.RerankResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &decoded))
+	assert.Equal(t, []dto.RerankResponseResult{{Index: 1, RelevanceScore: 0.9, Document: map[string]any{"text": "second"}}}, decoded.Results)
+	assert.Equal(t, 7, decoded.Usage.PromptTokens)
+	assert.Zero(t, decoded.Usage.CompletionTokens)
+}

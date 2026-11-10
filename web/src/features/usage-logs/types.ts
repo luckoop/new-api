@@ -123,6 +123,13 @@ export interface LogOtherData {
     local_count_tokens?: boolean
     usage_billing_path?: UsageBillingPath | string
     channel_affinity?: ChannelAffinityInfo
+    // Billing-time queue snapshot of the selected channel (queue-aware
+    // routing, admin only). Absent when no fresh sample exists.
+    channel_queue_load?: {
+      waiting: number
+      running: number
+      overloaded?: boolean
+    }
     // Top-up audit fields (type=1, admin only)
     payment_method?: string
     callback_payment_method?: string

@@ -342,7 +342,7 @@ export function BalanceCell({ channel }: { channel: Channel }) {
   const { t, i18n } = useTranslation()
   const queryClient = useQueryClient()
   const layout = useContext(ChannelRowActionsLayoutContext)
-  const { sensitiveVisible, setCurrentRow, setOpen } = useChannels()
+  const { sensitiveVisible, setCurrentRow } = useChannels()
   const isTagRow = isTagAggregateRow(channel)
   const balance = channel.balance || 0
   const usedQuota = channel.used_quota || 0
@@ -433,17 +433,8 @@ export function BalanceCell({ channel }: { channel: Channel }) {
 
   // Regular channel row: show used and remaining with click to update
   const variant = getBalanceVariant(balance)
-  const isInferenceChannel =
-    channel.type === CHANNEL_TYPE_VLLM || channel.type === CHANNEL_TYPE_SGLANG
-  const inferenceStatusLabel =
-    channel.type === CHANNEL_TYPE_SGLANG ? t('SGLang status') : t('vLLM status')
 
   const handleClickUpdate = async () => {
-    if (isInferenceChannel) {
-      setCurrentRow(channel)
-      setOpen('inference-status')
-      return
-    }
     if (isUpdating) {
       return
     }
@@ -497,19 +488,15 @@ export function BalanceCell({ channel }: { channel: Channel }) {
     remainingBadgeLabel = t('Updating...')
   } else if (sensitiveVisible && channel.type === 57) {
     remainingBadgeLabel = t('Account Info')
-  } else if (sensitiveVisible && isInferenceChannel) {
-    remainingBadgeLabel = inferenceStatusLabel
   }
   let remainingTooltipLabel = remainingLabel
   if (!sensitiveVisible) {
     remainingTooltipLabel = maskedRemainingLabel
   } else if (channel.type === 57) {
     remainingTooltipLabel = t('Click to view Codex usage')
-  } else if (isInferenceChannel) {
-    remainingTooltipLabel = inferenceStatusLabel
   }
   let remainingBadgeVariant: StatusBadgeProps['variant'] = variant
-  if (channel.type === 57 || isInferenceChannel) {
+  if (channel.type === 57) {
     remainingBadgeVariant = 'info'
   } else if (isUpdating) {
     remainingBadgeVariant = 'neutral'
@@ -522,7 +509,7 @@ export function BalanceCell({ channel }: { channel: Channel }) {
       copyable={false}
       showDot={false}
       className='cursor-pointer'
-      onClick={isInferenceChannel ? undefined : handleClickUpdate}
+      onClick={handleClickUpdate}
     />
   )
 
@@ -547,26 +534,10 @@ export function BalanceCell({ channel }: { channel: Channel }) {
           </TooltipContent>
         </Tooltip>
         <Tooltip>
-          <TooltipTrigger
-            render={
-              isInferenceChannel ? (
-                <Button
-                  variant='ghost'
-                  size='sm'
-                  className='h-auto rounded-full p-0'
-                  aria-haspopup='dialog'
-                  onClick={handleClickUpdate}
-                >
-                  {remainingBadge}
-                </Button>
-              ) : (
-                remainingBadge
-              )
-            }
-          />
+          <TooltipTrigger render={remainingBadge} />
           <TooltipContent>
             <p>{remainingTooltipLabel}</p>
-            {channel.type !== 57 && !isInferenceChannel && (
+            {channel.type !== 57 && (
               <p>{t('Click to update balance')}</p>
             )}
           </TooltipContent>
@@ -612,6 +583,85 @@ export function BalanceCell({ channel }: { channel: Channel }) {
         />
       )}
     </TooltipProvider>
+  )
+}
+
+/**
+ * Inference status entry as its own column: opening the per-channel
+ * /metrics dialog no longer hijacks the balance badge, so balance refresh
+ * keeps working for vLLM/SGLang channels.
+ */
+export function InferenceStatusCell({ channel }: { channel: Channel }) {
+  const { t } = useTranslation()
+  const { setCurrentRow, setOpen } = useChannels()
+  if (isTagAggregateRow(channel)) {
+    return <span className='text-muted-foreground text-xs'>-</span>
+  }
+  const isInferenceChannel =
+    channel.type === CHANNEL_TYPE_VLLM || channel.type === CHANNEL_TYPE_SGLANG
+  if (!isInferenceChannel) {
+    return <span className='text-muted-foreground text-xs'>-</span>
+  }
+  const label =
+    channel.type === CHANNEL_TYPE_SGLANG ? t('SGLang status') : t('vLLM status')
+  return (
+    <Button
+      variant='ghost'
+      size='sm'
+      className='h-auto rounded-full p-0'
+      aria-haspopup='dialog'
+      onClick={() => {
+        setCurrentRow(channel)
+        setOpen('inference-status')
+      }}
+    >
+      <StatusBadge
+        label={label}
+        variant='info'
+        size='sm'
+        copyable={false}
+        showDot={false}
+      />
+    </Button>
+  )
+}
+
+/**
+ * Queue-aware routing column: shows the latest sampled running/waiting gauges
+ * for vLLM/SGLang channels. The samples arrive through the provider's
+ * inference-loads poll, so this cell never issues its own requests.
+ */
+export function InferenceQueueCell({ channel }: { channel: Channel }) {
+  const { inferenceLoads } = useChannels()
+  if (isTagAggregateRow(channel)) {
+    return <span className='text-muted-foreground text-xs'>-</span>
+  }
+  const isInferenceChannel =
+    channel.type === CHANNEL_TYPE_VLLM || channel.type === CHANNEL_TYPE_SGLANG
+  if (!isInferenceChannel) {
+    return <span className='text-muted-foreground text-xs'>-</span>
+  }
+  const load = inferenceLoads.find((item) => item.channel_id === channel.id)
+  if (!load || !load.ok) {
+    return <span className='text-muted-foreground text-xs'>-</span>
+  }
+  return (
+    <span className='-ml-1.5 flex items-center gap-1'>
+      <StatusBadge
+        label={`R ${Math.round(load.running)}`}
+        variant='neutral'
+        size='sm'
+        copyable={false}
+        showDot={false}
+      />
+      <StatusBadge
+        label={`Q ${Math.round(load.waiting)}`}
+        variant={load.waiting > 0 ? 'warning' : 'success'}
+        size='sm'
+        copyable={false}
+        showDot={false}
+      />
+    </span>
   )
 }
 
@@ -1180,6 +1230,16 @@ export function useChannelsColumns(
         size: 180,
       },
 
+      // Inference status column (vLLM/SGLang per-channel /metrics dialog)
+      {
+        id: 'inference_status',
+        header: t('Status'),
+        meta: { mobileHidden: true },
+        cell: ({ row }) => <InferenceStatusCell channel={row.original} />,
+        size: 110,
+        enableSorting: false,
+      },
+
       // Response Time column
       {
         accessorKey: 'response_time',
@@ -1200,6 +1260,16 @@ export function useChannelsColumns(
           )
         },
         size: 110,
+      },
+
+      // Inference queue column (queue-aware routing sampling)
+      {
+        id: 'inference_queue',
+        header: t('Queue'),
+        meta: { mobileHidden: true },
+        cell: ({ row }) => <InferenceQueueCell channel={row.original} />,
+        size: 90,
+        enableSorting: false,
       },
 
       // Test Time column

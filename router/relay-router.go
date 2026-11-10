@@ -92,8 +92,9 @@ func SetRelayRouter(router *gin.Engine) {
 		httpRouter.Use(middleware.Distribute())
 
 		// claude related routes
-		// TODO: /messages/count_tokens is disabled. The current controller.CountClaudeTokens
-		// httpRouter.POST("/messages/count_tokens", controller.CountClaudeTokens)
+		// count_tokens is forwarded to the selected vLLM upstream; other channel
+		// types keep the local estimator inside CountClaudeTokensUpstream.
+		httpRouter.POST("/messages/count_tokens", controller.CountClaudeTokensUpstream)
 		httpRouter.POST("/messages", func(c *gin.Context) {
 			controller.Relay(c, types.RelayFormatClaude)
 		})

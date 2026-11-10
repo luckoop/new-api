@@ -127,6 +127,16 @@ function buildDetailSegments(
   if (isAdmin && other?.admin_info?.quota_saturation) {
     adminSegments.push({ text: t('Quota clamped'), danger: true })
   }
+  if (isAdmin && other?.admin_info?.channel_queue_load) {
+    const queueLoad = other.admin_info.channel_queue_load
+    adminSegments.push({
+      text: t('Channel queue', {
+        waiting: queueLoad.waiting,
+        running: queueLoad.running,
+      }),
+      danger: queueLoad.overloaded === true,
+    })
+  }
   return [...adminSegments, ...segments]
 }
 
@@ -426,6 +436,7 @@ export function useCommonLogsColumns(
               other?.admin_info?.is_multi_key === true &&
               typeof multiKeyIndex === 'number' &&
               Number.isFinite(multiKeyIndex)
+            const queueLoad = other?.admin_info?.channel_queue_load
 
             return (
               <TooltipProvider>
@@ -453,6 +464,22 @@ export function useCommonLogsColumns(
                           variant='neutral'
                           className='h-5 min-w-5 justify-center rounded-full px-1 font-mono text-xs'
                           aria-label={`${t('Key')} ${multiKeyIndex}`}
+                        />
+                      )}
+                      {queueLoad && (
+                        <StatusBadge
+                          label={`Q${Math.round(queueLoad.waiting)}`}
+                          size='sm'
+                          showDot={false}
+                          copyable={false}
+                          variant={
+                            queueLoad.overloaded === true ? 'danger' : 'neutral'
+                          }
+                          className='h-5 min-w-5 justify-center rounded-full px-1 font-mono text-xs'
+                          aria-label={t('Channel queue', {
+                            waiting: queueLoad.waiting,
+                            running: queueLoad.running,
+                          })}
                         />
                       )}
                       {hasRetryChain && (

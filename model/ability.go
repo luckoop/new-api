@@ -126,6 +126,10 @@ func GetChannel(
 		}
 		abilities = filterAbilitiesByConstraints(abilities, model, filters)
 	}
+	// Sampling must use the pre-filter candidate set: a channel dropped for
+	// overload still needs fresh samples to become eligible again.
+	TryRefreshInferenceChannels(abilityChannelIDs(abilities))
+	abilities = dropQueueOverloadedAbilities(abilities)
 	if len(abilities) > 0 {
 		priorities := make([]int64, 0)
 		seen := make(map[int64]bool)

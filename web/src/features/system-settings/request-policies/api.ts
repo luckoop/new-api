@@ -5,6 +5,12 @@ export type PolicyConfig = {
   options: Record<string, string>
 }
 export type PolicyDecision = { action: string; reason: string; source: string }
+export type QueueSnapshot = {
+  waiting: number
+  running: number
+  overloaded: boolean
+  age_ms: number
+}
 export type PolicyEvent = {
   attempt: number
   channel_id?: number
@@ -16,6 +22,9 @@ export type PolicyEvent = {
   elapsed_ms: number
   decision: PolicyDecision
   health?: string
+  // Decision-time queue snapshot of the selected channel; absent when no
+  // fresh queue sample exists (queue-aware routing disabled or stale).
+  queue?: QueueSnapshot | null
 }
 type Response<T> = { success: boolean; message?: string; data: T }
 export async function getPolicyConfig() {

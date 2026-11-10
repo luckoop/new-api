@@ -68,6 +68,9 @@ func IsRequestPolicyOption(key string) bool {
 	if strings.HasPrefix(key, "channel_affinity_setting.") {
 		return true
 	}
+	if strings.HasPrefix(key, "inference_routing_setting.") {
+		return true
+	}
 	switch key {
 	case "CheckSensitiveEnabled", "CheckSensitiveOnPromptEnabled", "SensitiveWords", "AutomaticEnableChannelEnabled", "ChannelDisableThreshold", "monitor_setting.auto_test_channel_enabled", "monitor_setting.auto_test_channel_minutes", "monitor_setting.channel_test_concurrency", "monitor_setting.channel_test_mode", "RetryTimes", "AutomaticRetryStatusCodes", "AutomaticDisableChannelEnabled", "AutomaticDisableStatusCodes", "AutomaticDisableKeywords":
 		return true

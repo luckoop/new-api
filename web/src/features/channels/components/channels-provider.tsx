@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 /* eslint-disable react-refresh/only-export-components */
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { OnChangeFn, SortingState } from '@tanstack/react-table'
 import React, {
   createContext,
@@ -28,6 +28,7 @@ import React, {
   useEffect,
 } from 'react'
 
+import { getInferenceLoads, type InferenceLoad } from '../api'
 import { useChannelUpstreamUpdates } from '../hooks/use-channel-upstream-updates'
 import { channelsQueryKeys } from '../lib'
 import type { Channel } from '../types'
@@ -70,6 +71,7 @@ type ChannelsContextType = {
   priorityActionContainer: HTMLDivElement | null
   setPriorityActionContainer: (container: HTMLDivElement | null) => void
   upstream: UpstreamUpdateState
+  inferenceLoads: InferenceLoad[]
 }
 
 // ============================================================================
@@ -114,6 +116,15 @@ export function ChannelsProvider({ children }: { children: React.ReactNode }) {
   }, [queryClient])
   const upstream = useChannelUpstreamUpdates(refreshChannels)
 
+  // The queue column is a soft monitoring signal: poll it independently of the
+  // channel list so a slow /metrics round-trip never blocks channel edits.
+  const { data: inferenceLoads = [] } = useQuery({
+    queryKey: [...channelsQueryKeys.all, 'inference-loads'] as const,
+    queryFn: ({ signal }) => getInferenceLoads(signal),
+    refetchInterval: 15_000,
+    retry: false,
+  })
+
   // useState setters are stable, so the context value only needs to change when
   // an actual state value changes. Memoizing avoids handing every consumer
   // (including all channel cards/cells) a brand-new object on each render.
@@ -136,6 +147,7 @@ export function ChannelsProvider({ children }: { children: React.ReactNode }) {
       priorityActionContainer,
       setPriorityActionContainer,
       upstream,
+      inferenceLoads,
     }),
     [
       open,
@@ -147,6 +159,7 @@ export function ChannelsProvider({ children }: { children: React.ReactNode }) {
       sensitiveVisible,
       priorityActionContainer,
       upstream,
+      inferenceLoads,
     ]
   )
 

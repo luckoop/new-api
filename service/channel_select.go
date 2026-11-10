@@ -329,38 +329,58 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 	usingGroup := retry.TokenGroup
 	var channel *model.Channel
 	var selectGroup string
+	affinityBypassed := false
+	affinityChannelID := 0
 	if retry.GetRetry() == 0 {
 		if preferredChannelID, found := GetPreferredChannelByAffinity(c, modelName, usingGroup); found {
-			affinityUsable := false
-			preferred, err := model.CacheGetChannel(preferredChannelID)
-			affinitySatisfied := false
-			if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled {
-				affinitySatisfied, _ = model.ChannelSatisfiesFilters(preferred, modelName, constraints.Filters)
+			affinityChannelID = preferredChannelID
+			// The affinity path never reaches GetRandomSatisfiedChannel, which
+			// is where sampling is normally triggered. Without this hint a busy
+			// affinity channel's snapshot freezes, goes stale, and fail-opens.
+			model.TryRefreshInferenceChannels([]int{preferredChannelID})
+			affinityOverloaded := model.IsChannelQueueOverloaded(preferredChannelID)
+			if affinityOverloaded {
+				affinityBypassed = true
+				RequestPolicy(c).AddEvent(PolicyEvent{ChannelID: preferredChannelID, Decision: PolicyDecision{
+					Action: "match", Reason: "affinity_channel_overloaded", Source: "session_rule"}})
+				logger.LogInfo(c, common.LogText(
+					"channel affinity bypassed for overloaded channel: channel_id=%d", preferredChannelID))
 			}
-			if affinitySatisfied {
-				if usingGroup == "auto" {
-					userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-					for _, g := range GetRequestAutoGroups(c, userGroup) {
-						if model.IsChannelEnabledForGroupModel(g, modelName, preferred.Id) {
-							selectGroup = g
-							common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
-							channel = preferred
-							affinityUsable = true
-							MarkChannelAffinityUsed(c, g, preferred.Id)
-							break
+			affinityUsable := false
+			if !affinityOverloaded {
+				preferred, err := model.CacheGetChannel(preferredChannelID)
+				affinitySatisfied := false
+				if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled {
+					affinitySatisfied, _ = model.ChannelSatisfiesFilters(preferred, modelName, constraints.Filters)
+				}
+				if affinitySatisfied {
+					if usingGroup == "auto" {
+						userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+						for _, g := range GetRequestAutoGroups(c, userGroup) {
+							if model.IsChannelEnabledForGroupModel(g, modelName, preferred.Id) {
+								selectGroup = g
+								common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
+								channel = preferred
+								affinityUsable = true
+								MarkChannelAffinityUsed(c, g, preferred.Id)
+								break
+							}
 						}
+					} else if model.IsChannelEnabledForGroupModel(usingGroup, modelName, preferred.Id) {
+						channel = preferred
+						selectGroup = usingGroup
+						affinityUsable = true
+						MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
 					}
-				} else if model.IsChannelEnabledForGroupModel(usingGroup, modelName, preferred.Id) {
-					channel = preferred
-					selectGroup = usingGroup
-					affinityUsable = true
-					MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
 				}
 			}
-			if !affinityUsable && !ShouldKeepChannelAffinityOnChannelDisabled() {
+			// Overload bypass happens before any request was sent, so it must
+			// not count as a broken strict binding. Keep the old affinity cache
+			// too: if the replacement fails, the next request can fall back.
+			if !affinityUsable && !affinityOverloaded && !ShouldKeepChannelAffinityOnChannelDisabled() {
 				ClearCurrentChannelAffinityCache(c)
 			}
-			if !affinityUsable && RequestPolicy(c).SessionMode == "strict" {
+			if !affinityUsable && !affinityOverloaded && RequestPolicy(c).SessionMode == "strict" {
 				return nil, "", &ChannelSelectError{StatusCode: http.StatusServiceUnavailable, Message: "strict_session_binding_unavailable"}
 			}
 		}
@@ -384,6 +404,18 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 				StatusCode: http.StatusServiceUnavailable, Code: types.ErrorCodeModelNotFound, MessageID: i18n.MsgDistributorNoAvailableChannel,
 				Params: map[string]any{"Group": usingGroup, "Model": modelName}, NoAvailableChannel: true,
 			}
+		}
+		if affinityBypassed {
+			// Jumping to an equally overloaded replacement only pays a KV
+			// cold-start for no benefit. Stay on the original affinity channel.
+			if model.IsChannelQueueOverloaded(channel.Id) {
+				if stay, stayGroup, ok := affinityStayCandidate(c, usingGroup, modelName, constraints.Filters, affinityChannelID); ok {
+					RequestPolicy(c).AddEvent(PolicyEvent{ChannelID: channel.Id, Decision: PolicyDecision{
+						Action: "match", Reason: "affinity_bypass_no_alternative", Source: "session_rule"}})
+					channel, selectGroup = stay, stayGroup
+				}
+			}
+			MarkChannelAffinityUsed(c, selectGroup, channel.Id)
 		}
 	}
 	if ok, kind := model.ChannelSatisfiesFilters(channel, modelName, constraints.Filters); !ok {

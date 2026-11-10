@@ -346,6 +346,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	createdAt := common.GetTimestamp()
 	other := params.Other
+	AttachChannelQueueLoad(params.ChannelId, other)
 	content := other.setContent(params.Content)
 	otherStr := other.JSONString()
 	// 判断是否需要记录 IP
@@ -436,6 +437,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 	createdAt := common.GetTimestamp()
 	other := params.Other
+	AttachChannelQueueLoad(params.ChannelId, other)
 	log := &Log{
 		UserId:    params.UserId,
 		Username:  username,

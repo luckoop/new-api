@@ -44,7 +44,7 @@ import { CHANNEL_TYPE_VLLM, CHANNEL_TYPE_SGLANG } from '../../constants'
 import type { InferenceStatus } from '../../lib/inference-status'
 import { channelSchema } from '../../types'
 import { ChannelRowActionsLayoutContext } from '../channel-row-actions-context'
-import { BalanceCell } from '../channels-columns'
+import { BalanceCell, InferenceStatusCell } from '../channels-columns'
 import { ChannelsDialogs } from '../channels-dialogs'
 import { ChannelsProvider } from '../channels-provider'
 import { InferenceStatusDialog } from '../dialogs/inference-status-dialog'
@@ -143,7 +143,7 @@ it.each([
     type: CHANNEL_TYPE_SGLANG,
   },
 ])(
-  'opens $name status from the balance cell in $layout view using $action',
+  'opens $name status from the inference status cell in $layout view using $action',
   async ({ layout, action, provider, name, type }) => {
     const get = vi.spyOn(api, 'get').mockImplementation(async (url) => {
       if (url === `/api/channel/42/${provider}/status`) {
@@ -167,7 +167,7 @@ it.each([
       <QueryClientProvider client={client}>
         <ChannelsProvider>
           <ChannelRowActionsLayoutContext.Provider value={layout}>
-            <BalanceCell channel={channel} />
+            <InferenceStatusCell channel={channel} />
           </ChannelRowActionsLayoutContext.Provider>
           <ChannelsDialogs />
         </ChannelsProvider>
@@ -190,6 +190,30 @@ it.each([
     )
   }
 )
+
+it('keeps the status entry out of the balance cell', () => {
+  const channel = channelSchema.parse({
+    id: 42,
+    type: CHANNEL_TYPE_VLLM,
+    key: '',
+    name: 'Test vLLM',
+    status: 1,
+    created_time: 1,
+    test_time: 0,
+    response_time: 0,
+    balance_updated_time: 0,
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <ChannelsProvider>
+        <ChannelRowActionsLayoutContext.Provider value='table'>
+          <BalanceCell channel={channel} />
+        </ChannelRowActionsLayoutContext.Provider>
+      </ChannelsProvider>
+    </QueryClientProvider>
+  )
+  expect(screen.queryByRole('button', { name: 'vLLM status' })).toBeNull()
+})
 
 it.each([
   { language: 'zhCN', locale: 'zh-CN' },

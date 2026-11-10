@@ -59,7 +59,7 @@ import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useResetForm } from '../hooks/use-reset-form'
 import { safeNumberFieldProps } from '../utils/numeric-field'
-import type { HealthSettings } from './defaults'
+import type { HealthSettings, InferenceRoutingSettings } from './defaults'
 import { useSavePolicy } from './use-save-policy'
 
 const numericString = z.string().refine((value) => {
@@ -102,6 +102,23 @@ const createChannelHealthSchema = (
           ),
         channel_test_mode: z.enum(channelTestModes),
       }),
+      inference_routing_setting: z.object({
+        enabled: z.boolean(),
+        max_waiting: z.coerce
+          .number()
+          .int(t('Queue threshold must be a non-negative integer'))
+          .min(0, t('Queue threshold must be a non-negative integer')),
+        sample_interval: z.coerce
+          .number()
+          .int(t('Sample validity must be between 5 and 600 seconds'))
+          .min(5, t('Sample validity must be between 5 and 600 seconds'))
+          .max(600, t('Sample validity must be between 5 and 600 seconds')),
+        queue_refresh_cooldown_seconds: z.coerce
+          .number()
+          .int(t('Refresh cooldown must be between 1 and 60 seconds'))
+          .min(1, t('Refresh cooldown must be between 1 and 60 seconds'))
+          .max(60, t('Refresh cooldown must be between 1 and 60 seconds')),
+      }),
     })
     .superRefine((values, ctx) => {
       const disableParsed = parseHttpStatusCodeRules(
@@ -123,7 +140,7 @@ type ChannelHealthFormValues = z.output<ChannelHealthSchema>
 type ChannelHealthFormInput = z.input<ChannelHealthSchema>
 
 type ChannelHealthSectionProps = {
-  defaultValues: HealthSettings
+  defaultValues: HealthSettings & InferenceRoutingSettings
 }
 
 function normalizeLineEndings(value: string) {
@@ -140,6 +157,10 @@ type NormalizedChannelHealthValues = {
   'monitor_setting.auto_test_channel_minutes': number
   'monitor_setting.channel_test_concurrency': number
   'monitor_setting.channel_test_mode': ChannelTestMode
+  'inference_routing_setting.enabled': boolean
+  'inference_routing_setting.max_waiting': number
+  'inference_routing_setting.sample_interval': number
+  'inference_routing_setting.queue_refresh_cooldown_seconds': number
 }
 
 function normalizeChannelTestMode(value?: string): ChannelTestMode {
@@ -170,6 +191,13 @@ const buildFormDefaults = (
       defaults['monitor_setting.channel_test_mode']
     ),
   },
+  inference_routing_setting: {
+    enabled: defaults['inference_routing_setting.enabled'],
+    max_waiting: defaults['inference_routing_setting.max_waiting'],
+    sample_interval: defaults['inference_routing_setting.sample_interval'],
+    queue_refresh_cooldown_seconds:
+      defaults['inference_routing_setting.queue_refresh_cooldown_seconds'],
+  },
 })
 
 const normalizeDefaults = (
@@ -193,6 +221,14 @@ const normalizeDefaults = (
   'monitor_setting.channel_test_mode': normalizeChannelTestMode(
     defaults['monitor_setting.channel_test_mode']
   ),
+  'inference_routing_setting.enabled':
+    defaults['inference_routing_setting.enabled'],
+  'inference_routing_setting.max_waiting':
+    defaults['inference_routing_setting.max_waiting'],
+  'inference_routing_setting.sample_interval':
+    defaults['inference_routing_setting.sample_interval'],
+  'inference_routing_setting.queue_refresh_cooldown_seconds':
+    defaults['inference_routing_setting.queue_refresh_cooldown_seconds'],
 })
 
 const normalizeFormValues = (
@@ -214,6 +250,14 @@ const normalizeFormValues = (
   'monitor_setting.channel_test_concurrency':
     values.monitor_setting.channel_test_concurrency,
   'monitor_setting.channel_test_mode': values.monitor_setting.channel_test_mode,
+  'inference_routing_setting.enabled':
+    values.inference_routing_setting.enabled,
+  'inference_routing_setting.max_waiting':
+    values.inference_routing_setting.max_waiting,
+  'inference_routing_setting.sample_interval':
+    values.inference_routing_setting.sample_interval,
+  'inference_routing_setting.queue_refresh_cooldown_seconds':
+    values.inference_routing_setting.queue_refresh_cooldown_seconds,
 })
 
 export function ChannelHealthSection({
@@ -588,6 +632,116 @@ export function ChannelHealthSection({
                     <FormDescription>
                       {t(
                         'If an upstream error contains any of these keywords (case insensitive), the channel will be disabled automatically.'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </SettingsFormGrid>
+          </div>
+
+          <Separator />
+
+          <div className='flex min-w-0 flex-col gap-4'>
+            <h4 className='text-sm font-medium'>
+              {t('Queue-aware routing (vLLM / SGLang)')}
+            </h4>
+            <SettingsFormGrid>
+              <FormField
+                control={form.control}
+                name='inference_routing_setting.enabled'
+                render={({ field }) => (
+                  <SettingsSwitchItem>
+                    <SettingsSwitchContent>
+                      <FormLabel>
+                        {t('Queue-aware channel routing')}
+                      </FormLabel>
+                      <FormDescription>
+                        {t(
+                          'Samples waiting/running queue metrics from inference backends and deprioritizes overloaded channels before selection.'
+                        )}
+                      </FormDescription>
+                    </SettingsSwitchContent>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </SettingsSwitchItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='inference_routing_setting.max_waiting'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      {t('Queue threshold (waiting requests)')}
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={0}
+                        step={1}
+                        {...safeNumberFieldProps(field)}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Channels whose sampled waiting queue reaches this threshold are deprioritized'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='inference_routing_setting.sample_interval'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Sample validity (seconds)')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={5}
+                        max={600}
+                        step={1}
+                        {...safeNumberFieldProps(field)}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Queue samples older than this window are treated as stale and routing falls back to normal ordering'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='inference_routing_setting.queue_refresh_cooldown_seconds'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Refresh cooldown (seconds)')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={1}
+                        max={60}
+                        step={1}
+                        {...safeNumberFieldProps(field)}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Minimum interval between on-demand queue refreshes per channel'
                       )}
                     </FormDescription>
                     <FormMessage />

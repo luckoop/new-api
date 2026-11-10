@@ -23,7 +23,7 @@ import { useTranslation } from 'react-i18next'
 import { GroupBadge } from '@/components/group-badge'
 import { StatusBadgeTypeContext } from '@/components/status-badge'
 
-import { CHANNEL_STATUS } from '../constants'
+import { CHANNEL_STATUS, CHANNEL_TYPE_SGLANG, CHANNEL_TYPE_VLLM } from '../constants'
 import { isTagAggregateRow, parseGroupsList } from '../lib'
 import type { Channel } from '../types'
 import { ChannelRowActionsLayoutContext } from './channel-row-actions-context'
@@ -72,8 +72,14 @@ function ChannelCardComponent({
   const priorityCell = renderCell('priority')
   const weightCell = renderCell('weight')
   const balanceCell = renderCell('balance')
+  const inferenceStatusCell = renderCell('inference_status')
   const responseCell = renderCell('response_time')
   const testCell = renderCell('test_time')
+  // The status entry lives in its own column; card view must pull it
+  // explicitly or inference channels would lose the dialog entry entirely.
+  const isInferenceChannel =
+    row.original.type === CHANNEL_TYPE_VLLM ||
+    row.original.type === CHANNEL_TYPE_SGLANG
 
   const labelClass = 'text-muted-foreground text-[11px] font-medium select-none'
 
@@ -152,6 +158,16 @@ function ChannelCardComponent({
                   {testCell ?? <span className='text-muted-foreground'>-</span>}
                 </dd>
               </div>
+              {isInferenceChannel && (
+                <div className='row-span-2 grid min-w-0 grid-rows-subgrid'>
+                  <dt className={labelClass}>{t('Status')}</dt>
+                  <dd className='min-w-0 text-sm [&_[data-slot=status-badge]]:!ml-0'>
+                    {inferenceStatusCell ?? (
+                      <span className='text-muted-foreground'>-</span>
+                    )}
+                  </dd>
+                </div>
+              )}
             </dl>
           </div>
         </StatusBadgeTypeContext.Provider>

@@ -41,10 +41,17 @@ export type FilteringSettings = Pick<
   SecuritySettings,
   'CheckSensitiveEnabled' | 'CheckSensitiveOnPromptEnabled' | 'SensitiveWords'
 >
+export type InferenceRoutingSettings = {
+  'inference_routing_setting.enabled': boolean
+  'inference_routing_setting.max_waiting': number
+  'inference_routing_setting.sample_interval': number
+  'inference_routing_setting.queue_refresh_cooldown_seconds': number
+}
 export type RequestPolicySettings = RetrySettings &
   HealthSettings &
   FilteringSettings &
-  Pick<ChannelAffinitySettings, keyof ChannelAffinitySettings>
+  Pick<ChannelAffinitySettings, keyof ChannelAffinitySettings> &
+  InferenceRoutingSettings
 
 export const defaultRequestPolicySettings: RequestPolicySettings = {
   RetryTimes: 0,
@@ -66,6 +73,10 @@ export const defaultRequestPolicySettings: RequestPolicySettings = {
   'channel_affinity_setting.max_entries': 100000,
   'channel_affinity_setting.default_ttl_seconds': 3600,
   'channel_affinity_setting.rules': '[]',
+  'inference_routing_setting.enabled': false,
+  'inference_routing_setting.max_waiting': 8,
+  'inference_routing_setting.sample_interval': 15,
+  'inference_routing_setting.queue_refresh_cooldown_seconds': 1,
   CheckSensitiveEnabled: false,
   CheckSensitiveOnPromptEnabled: false,
   SensitiveWords: '',

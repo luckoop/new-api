@@ -78,25 +78,28 @@ func getInferenceChannelStatus(c *gin.Context, channelType int) {
 	common.ApiSuccess(c, status)
 }
 
-// fetchInferenceStatus reads only fixed paths on an operator-configured channel.
-// Each endpoint can fail independently; upstream errors never echo credentials.
-func fetchInferenceStatus(ctx context.Context, channel *model.Channel) (*inferenceStatus, error) {
+// prepareInferenceStatusClient validates the channel address and builds the
+// shared headers/client used by both the admin status endpoint and the
+// on-demand queue sampler. Credentials are never forwarded on redirects.
+//
+// Errors: returns an operator-facing error without echoing the key or URL.
+func prepareInferenceStatusClient(channel *model.Channel) (string, http.Header, *http.Client, error) {
 	if channel.Type != constant.ChannelTypeVLLM && channel.Type != constant.ChannelTypeSGLang {
-		return nil, errors.New("This operation is only supported for vLLM or SGLang channels")
+		return "", nil, nil, errors.New("This operation is only supported for vLLM or SGLang channels")
 	}
 	baseURL := strings.TrimRight(strings.TrimSpace(channel.GetBaseURL()), "/")
 	parsedURL, err := url.Parse(baseURL)
 	if err != nil || parsedURL.Host == "" || parsedURL.User != nil || parsedURL.RawQuery != "" || parsedURL.Fragment != "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
-		return nil, errors.New("Invalid inference server address")
+		return "", nil, nil, errors.New("Invalid inference server address")
 	}
 	key, _, keyErr := channel.GetNextEnabledKey()
 	if keyErr != nil {
-		return nil, errors.New("No enabled channel key")
+		return "", nil, nil, errors.New("No enabled channel key")
 	}
 	key = strings.TrimSpace(key)
 	headers, err := buildFetchModelsHeaders(channel, key)
 	if err != nil {
-		return nil, errors.New("Invalid channel header override")
+		return "", nil, nil, errors.New("Invalid channel header override")
 	}
 	if (key == "" || key == "EMPTY") && headers.Get("Authorization") == "Bearer "+key {
 		headers.Del("Authorization")
@@ -104,11 +107,21 @@ func fetchInferenceStatus(ctx context.Context, channel *model.Channel) (*inferen
 	settings := channel.GetSetting()
 	client, err := service.GetHttpClientWithProxySettings(settings.Proxy, settings)
 	if err != nil {
-		return nil, errors.New("Invalid channel proxy")
+		return "", nil, nil, errors.New("Invalid channel proxy")
 	}
 	// Do not mutate the shared client or forward channel credentials on redirects.
 	statusClient := *client
 	statusClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return baseURL, headers, &statusClient, nil
+}
+
+// fetchInferenceStatus reads only fixed paths on an operator-configured channel.
+// Each endpoint can fail independently; upstream errors never echo credentials.
+func fetchInferenceStatus(ctx context.Context, channel *model.Channel) (*inferenceStatus, error) {
+	baseURL, headers, statusClient, err := prepareInferenceStatusClient(channel)
+	if err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 

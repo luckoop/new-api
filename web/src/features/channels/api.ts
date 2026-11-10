@@ -81,6 +81,31 @@ export async function getInferenceStatus(
   return requireServerSuccess(response.data).data
 }
 
+// InferenceLoad is one channel's /metrics snapshot as served by the admin
+// queue column endpoint. Samples are process-local on the backend, so the
+// list is polled instead of invalidated.
+export type InferenceLoad = {
+  channel_id: number
+  waiting: number
+  running: number
+  kv_cache_usage: number
+  cache_hit_rate: number
+  // Unix seconds, matching the site-wide timestamp convention used by
+  // formatRelativeTime and the test_time column.
+  sampled_at: number
+  ok: boolean
+}
+
+export async function getInferenceLoads(
+  signal?: AbortSignal
+): Promise<InferenceLoad[]> {
+  const response = await api.get<{ success: boolean; data: InferenceLoad[] }>(
+    '/api/channel/inference_loads',
+    { signal, disableDuplicate: true }
+  )
+  return requireServerSuccess(response.data).data
+}
+
 export type TaskPluginOption = {
   sortPriority?: number
   website?: string
